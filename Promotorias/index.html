@@ -834,7 +834,7 @@ td {font-size:12px}
 <div id="policyMatches" class="notice" hidden>
   <label for="policyChoice">Seleccione el registro que desea editar</label>
   <select id="policyChoice"></select>
-  <button type="button" class="btn small" onclick="choosePolicy()">Cargar póliza</button>
+  <button type="button" class="btn small" onclick="choosePolicy()">Cargar reconocimiento</button>
 </div>
 <div class="footer-actions">
 
@@ -854,6 +854,7 @@ td {font-size:12px}
   </button>
   <button class="btn secondary" type="button" id="editbtn" onclick="beginEdit()">Editar</button>
   <button class="btn secondary" type="button" id="searchPolicyBtn" onclick="searchPolicy()" hidden>Buscar póliza</button>
+  <button class="btn secondary" type="button" id="searchIdBtn" onclick="searchPolicy(true)" hidden>Buscar reconocimiento</button>
 </div>
 
         <button class="btn orange" type="submit" id="savebtn">
@@ -1075,7 +1076,7 @@ td {font-size:12px}
 <script>
 'use strict';
 
- const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxYxKnB50G2hWcyKAyRK9E5pyTVCSdj9vlU1th4lGlzFaaxwyhZ8AgfIMtXYpGIPWlR/exec"; 
+ const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwpAl4jHpVKM6iSP0O0ZOKS3DYtw9iHh0RCLgsjD03dhka1jrSrrOF8VNc9SXtshRQY/exec"; 
 
 let data = {
   comisiones: [],
@@ -1089,79 +1090,78 @@ let savedId = null;
 let details = [];
 let lockedAgent = '';
 let busy = false;
-let editMode = false, editRecord = null, policyResults = [];
+let editMode=false, editRecord=null, policyResults=[], editGroup=null, editIndex=-1;
 function beginEdit() {
-  if (busy) return;
-  if (!data.fecha) return toast("Espere a que se carguen los catálogos.",true);
-  if (editMode && editRecord && !confirm('¿Descartar los cambios de la póliza actual?')) return;
-  if (!editMode && savedId === null && (details.length || ['nombre','vigencia','poliza','prima'].some(id => val(id))) && !confirm('¿Descartar los datos sin guardar para buscar una póliza?')) return;
-  const previous = val('poliza');
-  details = []; savedId = null; lockedAgent = ''; editRecord = null; editMode = true;
+  if(busy) return;
+  if(!data.fecha) return toast('Espere a que se carguen los catálogos.',true);
+  if((editMode || (savedId===null && (details.length || val('poliza')))) && !confirm('¿Descartar los cambios sin guardar y buscar otro reconocimiento?')) return;
+  details=[]; savedId=null; lockedAgent=''; editRecord=null; editGroup=null; editIndex=-1; editMode=true;
   $('form').reset(); refreshSelectors(); clearPolicyFields();
-  $('agente').disabled = false; $('elaboradoPor').readOnly = false;
-  $('numero').value = ''; $('id').textContent = '—'; $('fecha').value = '';
-  $('poliza').value = previous; $('poliza').focus(); $('poliza').select();
-  $('editNotice').hidden = false;
-  $('editNotice').textContent = 'Modo edición: escriba el No. de póliza y presione Enter o Buscar póliza.';
-  $('searchPolicyBtn').hidden = false; $('policyMatches').hidden = true;
-  $('addbtn').disabled = true; $('savebtn').disabled = true; $('wordbtn').disabled = true; $('printbtn').disabled = true;
-  $('savedText').textContent = 'Busque una póliza existente.'; renderPreview();
+  $('agente').disabled=false; $('elaboradoPor').readOnly=false;
+  $('numero').value=''; $('id').textContent='—'; $('fecha').value='';
+  $('editNotice').hidden=false; $('editNotice').textContent='Busque por No. de póliza o por correlativo del reconocimiento.';
+  $('searchPolicyBtn').hidden=false; $('searchIdBtn').hidden=false; $('policyMatches').hidden=true;
+  $('addbtn').disabled=true; $('savebtn').disabled=true; $('wordbtn').disabled=true; $('printbtn').disabled=true;
+  $('savedText').textContent='Busque un reconocimiento existente.'; $('poliza').focus(); renderPreview();
 }
-async function searchPolicy() {
-  if (!editMode || busy || editRecord) return;
-  const q = val('poliza').trim();
-  if (!q) return toast('Escriba el No. de póliza.', true);
-  busy = true; $('searchPolicyBtn').disabled = true; $('policyMatches').hidden = true;
+async function searchPolicy(byId=false) {
+  if(!editMode || busy || editGroup) return;
+  const q=byId ? prompt('Número correlativo del reconocimiento:') : val('poliza').trim();
+  if(!q) return;
+  busy=true; $('searchPolicyBtn').disabled=true; $('searchIdBtn').disabled=true; $('policyMatches').hidden=true;
   try {
-    policyResults = await api('buscarPoliza', q);
-    if (!policyResults.length) return toast('No se encontró la póliza en Base.', true);
-    if (policyResults.length === 1) return loadPolicy(policyResults[0]);
-    $('policyChoice').replaceChildren(new Option('Seleccione un registro',''));
-    policyResults.forEach((r,i) => $('policyChoice').add(new Option('No. '+r.item.id+' | '+r.item.compania+' | '+r.item.nombre+' | '+r.item.vigencia+' | Fila '+r.row,String(i))));
-    $('policyMatches').hidden = false; $('policyChoice').focus();
-  } catch(err) { toast(err.message,true); }
-  finally { busy = false; $('searchPolicyBtn').disabled = false; }
-}
-function choosePolicy() {
-  if (busy || val('policyChoice') === '') return;
-  loadPolicy(policyResults[Number(val('policyChoice'))]);
-}
-function setHistorical(id,value) {
-  if (!Array.from($(id).options).some(o=>o.value===value)) $(id).add(new Option(value,value));
-  $(id).disabled = false; $(id).value = value;
-}
-function loadPolicy(r) {
-  editRecord = r; const d = r.item;
-  details = r.grupo.filter(x=>x.row!==r.row).map(x=>x.item);
-  $('numero').value=d.id; $('id').textContent=d.id; $('fecha').value=d.fecha;
-  $('nombre').value=d.nombre; $('vigencia').value=d.vigencia; $('poliza').value=d.poliza; $('prima').value=d.prima;
-  setHistorical('compania',d.compania); updateProductos();
-  setHistorical('producto',d.producto); updateTipos(); setHistorical('tipo',d.tipo);
-  setHistorical('agente',d.agente); updateAgente(); $('alianza').value=d.alianza; $('oficial').value=d.oficial;
-  $('elaboradoPor').value=d.elaboradoPor; $('agente').disabled=r.grupo.length>1; $('elaboradoPor').readOnly=r.grupo.length>1;
-  $('policyMatches').hidden=true; $('searchPolicyBtn').hidden=true; $('savebtn').disabled=false;
-  $('editNotice').textContent='Editando reconocimiento No. '+d.id+' — póliza '+d.poliza+'. '+(r.grupo.length>1?'Agente y Elaborado por son comunes al lote y permanecen bloqueados. ':'')+'El correlativo y la fecha de ingreso se conservan.';
-  updatePorcentaje(); renderPreview(); $('nombre').focus();
-}
-async function saveEdited() {
-  if (busy || !editRecord) return;
-  let item;
-  try { item=detailFromFields(true); if(!val('agente') || !val('elaboradoPor').trim()) throw new Error('Complete Agente y Elaborado por.'); }
-  catch(err){return toast(err.message,true);}
-  if(!confirm('¿Guardar los cambios en la póliza del reconocimiento No. '+editRecord.item.id+'?')) return;
-  busy=true; $('savebtn').disabled=true;
-  try {
-    const r=await api('actualizarPoliza',{token:editRecord.token,item,agente:val('agente'),elaboradoPor:val('elaboradoPor').trim()});
-    savedId=r.id; details=r.items; editRecord=null; editMode=false;
-    $('editNotice').hidden=true; $('wordbtn').disabled=false; $('printbtn').disabled=false;
-    $('agente').disabled=true; $('elaboradoPor').readOnly=false;
-    clearPolicyFields(); renderPreview();
-    $('savedText').textContent='Reconocimiento No. '+r.id+' actualizado correctamente.';
-    toast('Póliza actualizada sin crear un nuevo registro.');
+    policyResults=await api('buscarReconocimiento',q,byId);
+    if(!policyResults.length) return toast('No se encontró el reconocimiento.',true);
+    if(policyResults.length===1) return loadGroup(policyResults[0]);
+    $('policyChoice').replaceChildren(new Option('Seleccione un reconocimiento',''));
+    policyResults.forEach((r,i)=>$('policyChoice').add(new Option('No. '+r.id+' | '+r.items[0].agente+' | '+r.items.length+' pólizas',String(i))));
+    $('policyMatches').hidden=false;
   } catch(err){toast(err.message,true);}
-  finally {busy=false; $('savebtn').disabled=savedId!==null || !editRecord;}
+  finally{busy=false; $('searchPolicyBtn').disabled=false; $('searchIdBtn').disabled=false;}
 }
-document.addEventListener('keydown',e=>{if(e.target.id==='poliza' && e.key==='Enter' && editMode && !editRecord){e.preventDefault(); searchPolicy();}});
+function choosePolicy(){if(!busy && val('policyChoice')!=='') loadGroup(policyResults[Number(val('policyChoice'))]);}
+function setHistorical(id,value){if(!Array.from($(id).options).some(o=>o.value===value)) $(id).add(new Option(value,value)); $(id).disabled=false; $(id).value=value;}
+function loadGroup(r){
+  editGroup=r; details=r.items.map(x=>({...x})); const d=details[0];
+  $('numero').value=r.id; $('id').textContent=r.id; $('fecha').value=d.fecha;
+  setHistorical('agente',d.agente); updateAgente(); $('alianza').value=d.alianza; $('oficial').value=d.oficial;
+  $('elaboradoPor').value=d.elaboradoPor; $('agente').disabled=true; $('elaboradoPor').readOnly=true;
+  $('policyMatches').hidden=true; $('searchPolicyBtn').hidden=true; $('searchIdBtn').hidden=true;
+  $('savebtn').disabled=false; $('addbtn').disabled=false;
+  $('editNotice').textContent='Reconocimiento No. '+r.id+' cargado. Edite cada línea o agregue otra póliza. Agente y Elaborado por se conservan.';
+  clearPolicyFields(); renderPreview();
+}
+function editLine(i){
+  if(busy || !editGroup) return;
+  if(editIndex!==-1 || ['nombre','vigencia','poliza','prima'].some(id=>val(id))) { if(!applyLine()) return; }
+  const d=details[i]; editIndex=i; editRecord={item:editGroup.items[i] || d};
+  $('nombre').value=d.nombre; $('vigencia').value=d.vigencia; $('poliza').value=d.poliza; $('prima').value=d.prima;
+  setHistorical('compania',d.compania); updateProductos(); setHistorical('producto',d.producto); updateTipos(); setHistorical('tipo',d.tipo);
+  $('addbtn').textContent='Aplicar cambios'; updatePorcentaje(); $('nombre').focus();
+}
+function applyLine(){
+  try {
+    const d=detailFromFields(true);
+    if(details.some((x,i)=>i!==editIndex && x.compania.toLowerCase()===d.compania.toLowerCase() && x.poliza.toLowerCase()===d.poliza.toLowerCase())) throw new Error('Póliza duplicada en este reconocimiento.');
+    if(editIndex>=0) details[editIndex]={...details[editIndex],...d}; else details.push(d);
+    editIndex=-1; editRecord=null; $('addbtn').textContent='Agregar'; clearPolicyFields(); renderPreview(); return true;
+  } catch(err){toast(err.message,true); return false;}
+}
+async function saveEdited(){
+  if(busy || !editGroup) return;
+  if(editIndex>=0 || ['nombre','vigencia','poliza','prima','compania'].some(id=>val(id))) if(!applyLine()) return;
+  if(!confirm('¿Guardar el reconocimiento No. '+editGroup.id+' con '+details.length+' pólizas?')) return;
+  busy=true; $('savebtn').disabled=true; $('addbtn').disabled=true;
+  try{
+    const r=await api('actualizarReconocimiento',{id:editGroup.id,tokens:editGroup.tokens,items:details});
+    savedId=r.id; details=r.items; editGroup=null; editRecord=null; editIndex=-1; editMode=false;
+    $('editNotice').hidden=true; $('wordbtn').disabled=false; $('printbtn').disabled=false;
+    $('savedText').textContent='Reconocimiento No. '+r.id+' actualizado con '+details.length+' pólizas.';
+    clearPolicyFields(); renderPreview(); toast('Reconocimiento actualizado correctamente.');
+  }catch(err){toast(err.message,true);}
+  finally{busy=false; $('savebtn').disabled=!editGroup; $('addbtn').disabled=!editGroup;}
+}
+document.addEventListener('keydown',e=>{if(e.target.id==='poliza' && e.key==='Enter' && editMode && !editGroup){e.preventDefault();searchPolicy();}});
 
 const $ = id => document.getElementById(id);
 const val = id => $(id).value;
@@ -1583,11 +1583,12 @@ function renderPreview() {
 
   const rows = details.map((x, index) => ({
     ...x,
+    ...(editGroup && editIndex===index && draft ? draft : {}),
     index,
     staged: true
   }));
 
-  if (draft && savedId === null && (!editMode || editRecord)) {
+  if (draft && savedId === null && (!editMode || (editGroup && editIndex<0))) {
     rows.push({
       ...draft,
       staged: false
@@ -1614,7 +1615,9 @@ function renderPreview() {
         ).join('') +
         '<td>' +
         (
-          d.staged && savedId === null && !editMode
+          d.staged && editGroup
+            ? '<button type="button" class="btn small secondary" onclick="editLine('+d.index+')">Editar</button>'
+            : d.staged && savedId === null && !editMode
             ? '<button type="button" class="btn small danger" onclick="removeDetail(' +
               d.index + ')">Quitar</button>'
             : d.staged
@@ -1664,7 +1667,9 @@ function clearPolicyFields() {
 
 /* Botón Agregar */
 function addDetail() {
-  if (busy || editMode) return;
+  if (busy) return;
+  if(editGroup) return applyLine();
+  if(editMode) return;
   if (savedId !== null) {
     return toast(
       'El reconocimiento ya está guardado. Presione Nuevo.',
@@ -1750,7 +1755,7 @@ function resetForm() {
   details = [];
   lockedAgent = '';
   savedId = null;
-  editMode=false; editRecord=null;
+  editMode=false; editRecord=null; editGroup=null; editIndex=-1; $('searchIdBtn').hidden=true; $('addbtn').textContent='Agregar';
   $('editNotice').hidden=true; $('policyMatches').hidden=true; $('searchPolicyBtn').hidden=true;
   $('elaboradoPor').readOnly=false; $('printbtn').disabled=false;
 
@@ -1822,7 +1827,7 @@ function recordPayload() {
 /* Guardar todas las pólizas en Base */
 async function save(e) {
   e.preventDefault();
-  if (editMode) return editRecord ? saveEdited() : searchPolicy();
+  if (editMode) return editGroup ? saveEdited() : searchPolicy();
 
   if (savedId !== null) {
     return toast('Este reconocimiento ya está guardado.');
@@ -2468,6 +2473,7 @@ function fields() {
 
 
 function showModal(which) {
+  if(editMode || busy) return toast('Finalice la edición antes de modificar catálogos.',true);
   if (editMode || busy) return toast("Finalice la edición antes de modificar catálogos.",true);
   active = which;
 
